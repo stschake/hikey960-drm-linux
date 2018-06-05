@@ -1011,7 +1011,7 @@ void hisi_fb_pan_display(struct drm_plane *plane)
 	u32 stride;
 	u32 display_addr;
 	u32 hal_fmt;
-	int chn_idx = DSS_RCHN_D2;
+	int chn_idx = DSS_RCHN_V0;
 
 	int crtc_x = state->crtc_x;
 	int crtc_y = state->crtc_y;
@@ -1087,7 +1087,7 @@ void hisi_dss_online_play(struct drm_plane *plane, drm_dss_layer_t *layer)
 	u32 stride;
 	u32 display_addr;
 
-	int chn_idx = DSS_RCHN_D2;
+	int chn_idx = DSS_RCHN_V0;
 	u32 hal_fmt = 0;
 	u32 src_w = state->src_w >> 16;
 	u32 src_h = state->src_h >> 16;
