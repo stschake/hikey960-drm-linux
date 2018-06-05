@@ -675,7 +675,7 @@ static int hisi_dss_mctl_sys_config(struct dss_hw_ctx *ctx, int chn_idx)
 
 static int hisi_dss_rdma_config(struct dss_hw_ctx *ctx,
 	const dss_rect_ltrb_t *rect, u32 display_addr, u32 hal_format,
-	u32 bpp, int chn_idx, bool afbcd, bool mmu_enable)
+	u32 bpp, int chn_idx, bool mmu_enable)
 {
 	void __iomem *rdma_base;
 
@@ -693,23 +693,10 @@ static int hisi_dss_rdma_config(struct dss_hw_ctx *ctx,
 	u32 mm_base_0 = 0;
 	u32 mm_base_1 = 0;
 
-	u32 afbcd_header_addr = 0;
-	u32 afbcd_header_stride = 0;
-	u32 afbcd_payload_addr = 0;
-	u32 afbcd_payload_stride = 0;
 	u32 h_display = 0;
-
-	if (!ctx) {
-		DRM_ERROR("ctx is NULL!\n");
-		return -1;
-	}
 
 	if (bpp == 4) {
 		rdma_bpp = 0x5;
-	} else if (bpp == 2) {
-		rdma_bpp = 0x0;
-	} else {
-		rdma_bpp = 0x0;
 	}
 
 	rdma_base = ctx->base +
@@ -727,93 +714,28 @@ static int hisi_dss_rdma_config(struct dss_hw_ctx *ctx,
 		return -EINVAL;
 	}
 
-	if (afbcd) {
-		mm_base_0 = 0;
-		mm_base_1 = mm_base_0 + rect->right * bpp * MMBUF_LINE_NUM;
-		mm_base_0 = ALIGN_UP(mm_base_0, MMBUF_ADDR_ALIGN);
-		mm_base_1 = ALIGN_UP(mm_base_1, MMBUF_ADDR_ALIGN);
-
-		if ((((rect->right - rect->left) + 1) & (AFBC_HEADER_ADDR_ALIGN - 1)) ||
-				(((rect->bottom - rect->top) + 1) & (AFBC_BLOCK_ALIGN - 1))) {
-			DRM_ERROR("img width(%d) is not %d bytes aligned, or "
-					"img heigh(%d) is not %d bytes aligned!\n",
-					((rect->right - rect->left) + 1), AFBC_HEADER_ADDR_ALIGN,
-					((rect->bottom - rect->top) + 1), AFBC_BLOCK_ALIGN);
-		}
-
-		if ((mm_base_0 & (MMBUF_ADDR_ALIGN - 1)) || (mm_base_1 & (MMBUF_ADDR_ALIGN - 1))) {
-			DRM_ERROR("mm_base_0(0x%x) is not %d bytes aligned, or "
-					"mm_base_1(0x%x) is not %d bytes aligned!\n",
-					mm_base_0, MMBUF_ADDR_ALIGN,
-					mm_base_1, MMBUF_ADDR_ALIGN);
-		}
-		/*header*/
-		afbcd_header_stride = (((rect->right - rect->left) + 1) / AFBC_BLOCK_ALIGN) * AFBC_HEADER_STRIDE_BLOCK;
-		afbcd_header_addr = (uint32_t)(unsigned long)display_addr;
-
-		/*payload*/
-		if (bpp == 4)
-			stride_align = AFBC_PAYLOAD_STRIDE_ALIGN_32;
-		else if (bpp == 2)
-			stride_align = AFBC_PAYLOAD_STRIDE_ALIGN_16;
-		else
-			DRM_ERROR("bpp(%d) not supported!\n", bpp);
-
-		afbcd_payload_stride = (((rect->right - rect->left) + 1) / AFBC_BLOCK_ALIGN) * stride_align;
-
-		afbcd_payload_addr = afbcd_header_addr + ALIGN_UP(16 * (((rect->right - rect->left) + 1) / 16) *
-				(((rect->bottom - rect->top) + 1) / 16), 1024);
-		afbcd_payload_addr = afbcd_payload_addr +
-			(rect->top / AFBC_BLOCK_ALIGN) * afbcd_payload_stride +
-			(rect->left / AFBC_BLOCK_ALIGN) * stride_align;
-
-		set_reg(rdma_base + CH_REG_DEFAULT, 0x1, 32, 0);
-		set_reg(rdma_base + CH_REG_DEFAULT, 0x0, 32, 0);
-		set_reg(rdma_base + DMA_OFT_X0, rdma_oft_x0, 12, 0);
-		set_reg(rdma_base + DMA_OFT_Y0, rdma_oft_y0, 16, 0);
-		set_reg(rdma_base + DMA_OFT_X1, rdma_oft_x1, 12, 0);
-		set_reg(rdma_base + DMA_OFT_Y1, rdma_oft_y1, 16, 0);
-		set_reg(rdma_base + DMA_STRETCH_SIZE_VRT, (rect->bottom - rect->top), 13, 0);
-		set_reg(rdma_base + DMA_CTRL, rdma_format, 5, 3);
-		set_reg(rdma_base + DMA_CTRL, (mmu_enable ? 0x1 : 0x0), 1, 8);
-
-		set_reg(rdma_base + AFBCD_HREG_PIC_WIDTH, (rect->right - rect->left), 16, 0);
-		set_reg(rdma_base + AFBCD_HREG_PIC_HEIGHT, (rect->bottom - rect->top), 16, 0);
-		set_reg(rdma_base + AFBCD_CTL, AFBC_HALF_BLOCK_UPPER_LOWER_ALL, 2, 6);
-		set_reg(rdma_base + AFBCD_HREG_HDR_PTR_LO, afbcd_header_addr, 32, 0);
-		set_reg(rdma_base + AFBCD_INPUT_HEADER_STRIDE, afbcd_header_stride, 14, 0);
-		set_reg(rdma_base + AFBCD_PAYLOAD_STRIDE, afbcd_payload_stride, 20, 0);
-		set_reg(rdma_base + AFBCD_MM_BASE_0, mm_base_0, 32, 0);
-		set_reg(rdma_base + AFBCD_HREG_FORMAT, 0x1, 1, 21);
-		set_reg(rdma_base + AFBCD_SCRAMBLE_MODE, 0x0, 32, 0);
-		set_reg(rdma_base + AFBCD_AFBCD_PAYLOAD_POINTER, afbcd_payload_addr, 32, 0);
-		set_reg(rdma_base + AFBCD_HEIGHT_BF_STR, (rect->bottom - rect->top), 16, 0);
-
-		set_reg(rdma_base + CH_CTL, 0xf005, 32, 0);
+	stretch_size_vrt = rdma_oft_y1 - rdma_oft_y0;
+	h_display = (rect->right - rect->left) + 1;
+	if (h_display % 64) {
+		rdma_stride = ROUND1(h_display, 64) * 64 * bpp / DMA_ALIGN_BYTES;
 	} else {
-		stretch_size_vrt = rdma_oft_y1 - rdma_oft_y0;
-		h_display = (rect->right - rect->left) + 1;
-		if (h_display % 64) {
-			rdma_stride = ROUND1(h_display, 64) * 64 * bpp / DMA_ALIGN_BYTES;
-		} else {
-			rdma_stride = h_display * bpp / DMA_ALIGN_BYTES;
-		}
-
-		set_reg(rdma_base + CH_REG_DEFAULT, 0x1, 32, 0);
-		set_reg(rdma_base + CH_REG_DEFAULT, 0x0, 32, 0);
-
-		set_reg(rdma_base + DMA_OFT_X0, rdma_oft_x0, 12, 0);
-		set_reg(rdma_base + DMA_OFT_Y0, rdma_oft_y0, 16, 0);
-		set_reg(rdma_base + DMA_OFT_X1, rdma_oft_x1, 12, 0);
-		set_reg(rdma_base + DMA_OFT_Y1, rdma_oft_y1, 16, 0);
-		set_reg(rdma_base + DMA_CTRL, rdma_format, 5, 3);
-		set_reg(rdma_base + DMA_CTRL, (mmu_enable ? 0x1 : 0x0), 1, 8);
-		set_reg(rdma_base + DMA_STRETCH_SIZE_VRT, stretch_size_vrt, 32, 0);
-		set_reg(rdma_base + DMA_DATA_ADDR0, display_addr, 32, 0);
-		set_reg(rdma_base + DMA_STRIDE0, rdma_stride, 13, 0);
-
-		set_reg(rdma_base + CH_CTL, 0x1, 1, 0);
+		rdma_stride = h_display * bpp / DMA_ALIGN_BYTES;
 	}
+
+	set_reg(rdma_base + CH_REG_DEFAULT, 0x1, 32, 0);
+	set_reg(rdma_base + CH_REG_DEFAULT, 0x0, 32, 0);
+
+	set_reg(rdma_base + DMA_OFT_X0, rdma_oft_x0, 12, 0);
+	set_reg(rdma_base + DMA_OFT_Y0, rdma_oft_y0, 16, 0);
+	set_reg(rdma_base + DMA_OFT_X1, rdma_oft_x1, 12, 0);
+	set_reg(rdma_base + DMA_OFT_Y1, rdma_oft_y1, 16, 0);
+	set_reg(rdma_base + DMA_CTRL, rdma_format, 5, 3);
+	set_reg(rdma_base + DMA_CTRL, (mmu_enable ? 0x1 : 0x0), 1, 8);
+	set_reg(rdma_base + DMA_STRETCH_SIZE_VRT, stretch_size_vrt, 32, 0);
+	set_reg(rdma_base + DMA_DATA_ADDR0, display_addr, 32, 0);
+	set_reg(rdma_base + DMA_STRIDE0, rdma_stride, 13, 0);
+
+	set_reg(rdma_base + CH_CTL, 0x1, 1, 0);
 
 	return 0;
 }
@@ -1075,7 +997,6 @@ void hisi_fb_pan_display(struct drm_plane *plane)
 	struct dss_hw_ctx *ctx = acrtc->ctx;
 
 	struct drm_gem_cma_object *obj = drm_fb_cma_get_gem_obj(state->fb, 0);
-	bool afbcd = false;
 	bool mmu_enable = false;
 	dss_rect_ltrb_t rect;
 	u32 bpp;
@@ -1129,7 +1050,7 @@ void hisi_fb_pan_display(struct drm_plane *plane)
 	hisi_dss_mif_config(ctx, chn_idx, mmu_enable);
 	hisi_dss_smmu_config(ctx, chn_idx, mmu_enable);
 
-	hisi_dss_rdma_config(ctx, &rect, display_addr, hal_fmt, bpp, chn_idx, afbcd, mmu_enable);
+	hisi_dss_rdma_config(ctx, &rect, display_addr, hal_fmt, bpp, chn_idx, mmu_enable);
 	hisi_dss_rdfc_config(ctx, &rect, hal_fmt, bpp, chn_idx);
 	hisi_dss_ovl_config(ctx, &rect, mode->hdisplay, mode->vdisplay);
 
@@ -1152,7 +1073,6 @@ void hisi_dss_online_play(struct drm_plane *plane, drm_dss_layer_t *layer)
 	struct dss_crtc *acrtc = aplane->acrtc;
 	struct dss_hw_ctx *ctx = acrtc->ctx;
 
-	bool afbcd = false;
 	bool mmu_enable = true;
 	dss_rect_ltrb_t rect;
 	u32 bpp;
@@ -1191,7 +1111,7 @@ void hisi_dss_online_play(struct drm_plane *plane, drm_dss_layer_t *layer)
 	hisi_dss_mif_config(ctx, chn_idx, mmu_enable);
 	hisi_dss_smmu_config(ctx, chn_idx, mmu_enable);
 
-	hisi_dss_rdma_config(ctx, &rect, display_addr, hal_fmt, bpp, chn_idx, afbcd, mmu_enable);
+	hisi_dss_rdma_config(ctx, &rect, display_addr, hal_fmt, bpp, chn_idx, mmu_enable);
 	hisi_dss_rdfc_config(ctx, &rect, hal_fmt, bpp, chn_idx);
 	hisi_dss_ovl_config(ctx, &rect, mode->hdisplay, mode->vdisplay);
 
