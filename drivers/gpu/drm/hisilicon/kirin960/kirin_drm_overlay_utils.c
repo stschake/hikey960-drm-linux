@@ -985,34 +985,20 @@ REDO:
 	return ret;
 }
 
-void hisi_fb_pan_display(struct drm_plane *plane)
+static void hisi_chn_configure(int chn_idx, struct drm_framebuffer *fb, int crtc_x, int crtc_y, int crtc_w, int crtc_h,
+							   int src_x, int src_y, unsigned int src_w, unsigned int src_h, struct dss_crtc *acrtc)
 {
-	struct drm_plane_state *state = plane->state;
-	struct drm_framebuffer *fb = state->fb;
 	struct drm_display_mode *mode;
 	struct drm_display_mode *adj_mode;
-
-	struct dss_plane *aplane = to_dss_plane(plane);
-	struct dss_crtc *acrtc = aplane->acrtc;
 	struct dss_hw_ctx *ctx = acrtc->ctx;
+	struct drm_gem_cma_object *obj = drm_fb_cma_get_gem_obj(fb, 0);
 
-	struct drm_gem_cma_object *obj = drm_fb_cma_get_gem_obj(state->fb, 0);
 	bool mmu_enable = false;
 	dss_rect_ltrb_t rect;
 	u32 bpp;
 	u32 stride;
 	u32 display_addr;
 	u32 hal_fmt;
-	int chn_idx = DSS_RCHN_V0;
-
-	int crtc_x = state->crtc_x;
-	int crtc_y = state->crtc_y;
-	unsigned int crtc_w = state->crtc_w;
-	unsigned int crtc_h = state->crtc_h;
-	u32 src_x = state->src_x >> 16;
-	u32 src_y = state->src_y >> 16;
-	u32 src_w = state->src_w >> 16;
-	u32 src_h = state->src_h >> 16;
 
 	u32 hfp, hbp, hsw, vfp, vbp, vsw;
 
@@ -1057,10 +1043,28 @@ void hisi_fb_pan_display(struct drm_plane *plane)
 	hisi_dss_mctl_ov_config(ctx, chn_idx);
 	hisi_dss_mctl_sys_config(ctx, chn_idx);
 	hisi_dss_mctl_mutex_unlock(ctx);
-	hisi_dss_unflow_handler(ctx, true);
+}
+
+void hisi_fb_pan_display(struct drm_plane *plane)
+{
+	struct drm_plane_state *state = plane->state;
+	struct drm_framebuffer *fb = state->fb;
+	struct dss_plane *aplane = to_dss_plane(plane);
+	struct dss_crtc *acrtc = aplane->acrtc;
+
+	int src_x = state->src_x >> 16, src_y = state->src_y >> 16;
+	unsigned int src_w = state->src_w >> 16, src_h = state->src_h >> 16;
+	int crtc_x = state->crtc_x, crtc_y = state->crtc_y, crtc_w = state->crtc_w, crtc_h = state->crtc_h;
+
+	hisi_chn_configure(DSS_RCHN_D2, fb, crtc_x, crtc_y, crtc_w, crtc_h,
+					   src_x, src_y, src_w, src_h, acrtc);
+
+	// TEST: use another channel with some offset to see if they compose..
+	hisi_chn_configure(DSS_RCHN_V0, fb, crtc_x + 50, crtc_y + 50, crtc_w - 50, crtc_h - 50,
+					   src_x + 50, src_y + 50, src_w - 50, src_h - 50, acrtc);
 
 	enable_ldi(acrtc);
-	hisi_dss_wait_for_complete(ctx);
+	hisi_dss_wait_for_complete(acrtc->ctx);
 }
 
 void hisi_dss_online_play(struct drm_plane *plane, drm_dss_layer_t *layer)
