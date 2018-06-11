@@ -349,7 +349,6 @@ static void get_dsi_phy_ctrl(struct dw_dsi *dsi,
 		dphy_req_kHz = mode->clock * bpp / dsi->client[id].lanes;
 
 	lane_clock = dphy_req_kHz / 1000;
-	DRM_INFO("Expected : lane_clock = %llu M\n", lane_clock);
 
 	/************************  PLL parameters config  *********************/
 	/*chip spec :
@@ -434,7 +433,6 @@ static void get_dsi_phy_ctrl(struct dw_dsi *dsi,
 	phy_ctrl->rg_pll_pre_p = n_pll;
 
 	lane_clock = m_pll * (DEFAULT_MIPI_CLK_RATE / n_pll) / vco_div;
-	DRM_INFO("Config : lane_clock = %llu\n", lane_clock);
 
 	/*FIXME :*/
 	phy_ctrl->rg_pll_cp = 1;		/*0x16[7:5]*/
@@ -574,48 +572,6 @@ static void get_dsi_phy_ctrl(struct dw_dsi *dsi,
 	phy_ctrl->clk_division = (((phy_ctrl->lane_byte_clk / 2) % mipi->max_tx_esc_clk) > 0) ?
 		(phy_ctrl->lane_byte_clk / 2 / mipi->max_tx_esc_clk + 1) :
 		(phy_ctrl->lane_byte_clk / 2 / mipi->max_tx_esc_clk);
-
-	DRM_INFO("PHY clock_lane and data_lane config : \n"
-		"rg_vrefsel_vcm=%u\n"
-		"clk_pre_delay=%u\n"
-		"clk_post_delay=%u\n"
-		"clk_t_hs_prepare=%u\n"
-		"clk_t_lpx=%u\n"
-		"clk_t_hs_zero=%u\n"
-		"clk_t_hs_trial=%u\n"
-		"data_pre_delay=%u\n"
-		"data_post_delay=%u\n"
-		"data_t_hs_prepare=%u\n"
-		"data_t_lpx=%u\n"
-		"data_t_hs_zero=%u\n"
-		"data_t_hs_trial=%u\n"
-		"data_t_ta_go=%u\n"
-		"data_t_ta_get=%u\n",
-		phy_ctrl->rg_vrefsel_vcm,
-		phy_ctrl->clk_pre_delay,
-		phy_ctrl->clk_post_delay,
-		phy_ctrl->clk_t_hs_prepare,
-		phy_ctrl->clk_t_lpx,
-		phy_ctrl->clk_t_hs_zero,
-		phy_ctrl->clk_t_hs_trial,
-		phy_ctrl->data_pre_delay,
-		phy_ctrl->data_post_delay,
-		phy_ctrl->data_t_hs_prepare,
-		phy_ctrl->data_t_lpx,
-		phy_ctrl->data_t_hs_zero,
-		phy_ctrl->data_t_hs_trial,
-		phy_ctrl->data_t_ta_go,
-		phy_ctrl->data_t_ta_get);
-	DRM_INFO("clk_lane_lp2hs_time=%u\n"
-		"clk_lane_hs2lp_time=%u\n"
-		"data_lane_lp2hs_time=%u\n"
-		"data_lane_hs2lp_time=%u\n"
-		"phy_stop_wait_time=%u\n",
-		phy_ctrl->clk_lane_lp2hs_time,
-		phy_ctrl->clk_lane_hs2lp_time,
-		phy_ctrl->data_lane_lp2hs_time,
-		phy_ctrl->data_lane_hs2lp_time,
-		phy_ctrl->phy_stop_wait_time);
 }
 
 static void dw_dsi_set_mode(struct dw_dsi *dsi, enum dsi_work_mode mode)
@@ -904,10 +860,6 @@ static void dsi_mipi_init(struct dw_dsi *dsi, char __iomem *mipi_dsi_base)
 	hline_time = ROUND1((dsi->ldi.h_pulse_width + dsi->ldi.h_back_porch +
 		rect.w + dsi->ldi.h_front_porch) * dsi->phy.lane_byte_clk, pixel_clk);
 
-	DRM_INFO("hsa_time=%d, hbp_time=%d, hline_time=%d\n",
-	    hsa_time, hbp_time, hline_time);
-	DRM_INFO("lane_byte_clk=%llu, pixel_clk=%llu\n",
-	    dsi->phy.lane_byte_clk, pixel_clk);
 	set_reg(mipi_dsi_base + MIPIDSI_VID_HSA_TIME_OFFSET, hsa_time, 12, 0);
 	set_reg(mipi_dsi_base + MIPIDSI_VID_HBP_TIME_OFFSET, hbp_time, 12, 0);
 	set_reg(mipi_dsi_base + MIPIDSI_VID_HLINE_TIME_OFFSET, hline_time, 15, 0);
