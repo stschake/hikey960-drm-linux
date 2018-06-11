@@ -27,25 +27,11 @@
 
 #include "kirin_drm_drv.h"
 
-
-#ifdef CONFIG_DRM_FBDEV_EMULATION
-static bool fbdev = true;
-MODULE_PARM_DESC(fbdev, "Enable fbdev compat layer");
-module_param(fbdev, bool, 0600);
-#endif
-
-
 static struct kirin_dc_ops *dc_ops;
 
 static int kirin_drm_kms_cleanup(struct drm_device *dev)
 {
 	struct kirin_drm_private *priv = dev->dev_private;
-
-	if (priv->fbdev) {
-		//kirin_drm_fbdev_fini(dev);
-		drm_fbdev_cma_fini(priv->fbdev);
-		priv->fbdev = NULL;
-	}
 
 	drm_kms_helper_poll_fini(dev);
 	dc_ops->cleanup(to_platform_device(dev->dev));
@@ -56,32 +42,14 @@ static int kirin_drm_kms_cleanup(struct drm_device *dev)
 	return 0;
 }
 
-static void kirin_fbdev_output_poll_changed(struct drm_device *dev)
+static void kirin_output_poll_changed(struct drm_device *dev)
 {
-	struct kirin_drm_private *priv = dev->dev_private;
-
 	dsi_set_output_client(dev);
-
-	/*if (priv->fbdev)
-		drm_fb_helper_hotplug_event(priv->fbdev);
-	else
-		priv->fbdev = kirin_drm_fbdev_init(dev);*/
-
-	if (priv->fbdev) {
-		DRM_INFO("hotplug_event!!!!!!");
-		drm_fbdev_cma_hotplug_event(priv->fbdev);
-	} else {
-		DRM_INFO("cma_init!!!!!!");
-		priv->fbdev = drm_fbdev_cma_init(dev, 32,
-						 dev->mode_config.num_connector);
-		if (IS_ERR(priv->fbdev))
-			priv->fbdev = NULL;
-	}
 }
 
 static const struct drm_mode_config_funcs kirin_drm_mode_config_funcs = {
 	.fb_create = drm_fb_cma_create,
-	.output_poll_changed = kirin_fbdev_output_poll_changed,
+	.output_poll_changed = kirin_output_poll_changed,
 	.atomic_check = drm_atomic_helper_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
@@ -137,9 +105,6 @@ static int kirin_drm_kms_init(struct drm_device *dev)
 
 	/* reset all the states of crtc/plane/encoder/connector */
 	drm_mode_config_reset(dev);
-
-	//if (fbdev)
-	//	priv->fbdev = kirin_drm_fbdev_init(dev);
 
 	/* init kms poll for handling hpd */
 	drm_kms_helper_poll_init(dev);
@@ -289,7 +254,6 @@ err_drm_dev_unref:
 
 static void kirin_drm_unbind(struct device *dev)
 {
-	//drm_put_dev(dev_get_drvdata(dev));
 	struct drm_device *drm_dev = dev_get_drvdata(dev);
 
 	drm_dev_unregister(drm_dev);
@@ -323,8 +287,6 @@ static int kirin_drm_platform_probe(struct platform_device *pdev)
 	of_node_put(remote);
 
 	return component_master_add_with_match(dev, &kirin_drm_ops, match);
-
-	return 0;
 }
 
 static int kirin_drm_platform_remove(struct platform_device *pdev)

@@ -39,10 +39,6 @@
 #include "kirin_drm_dpe_utils.h"
 #include "kirin_dpe_reg.h"
 
-#define DTS_COMP_DSS_NAME "hisilicon,hi3660-dpe"
-
-#define DSS_DEBUG	0
-
 static const struct dss_format dss_formats[] = {
 	/* 16bpp RGB: */
 	{ DRM_FORMAT_RGB565, HISI_FB_PIXEL_FORMAT_RGB_565 },
@@ -96,12 +92,12 @@ u32 dss_get_format(u32 pixel_format)
  */
 static void dss_ldi_set_mode(struct dss_crtc *acrtc)
 {
-	int ret;
-	u32 clk_Hz;
 	struct dss_hw_ctx *ctx = acrtc->ctx;
 	struct drm_display_mode *mode = &acrtc->base.state->mode;
 	struct drm_display_mode *adj_mode = &acrtc->base.state->adjusted_mode;
-
+	u32 clk_Hz = mode->clock * 1000UL;	
+	int ret;
+	
 
 	DRM_INFO("mode->clock(org) = %u\n", mode->clock);
 	if (mode->clock == 148500) {
@@ -112,8 +108,6 @@ static void dss_ldi_set_mode(struct dss_crtc *acrtc)
 		clk_Hz = 72000 * 1000UL;
 	} else if (mode->clock == 74250) {
 		clk_Hz = 72000 * 1000UL;
-	} else {
-		clk_Hz = mode->clock * 1000UL;;
 	}
 
 	/*
@@ -125,7 +119,6 @@ static void dss_ldi_set_mode(struct dss_crtc *acrtc)
 		DRM_ERROR("failed to set pixel clk %dHz (%d)\n", clk_Hz, ret);
 	}
 	adj_mode->clock = clk_get_rate(ctx->dss_pxl0_clk) / 1000;
-	DRM_INFO("dss_pxl0_clk = %u\n",  adj_mode->clock);
 
 	dpe_init(acrtc);
 }
@@ -164,6 +157,7 @@ static int dss_power_up(struct dss_crtc *acrtc)
 		DRM_ERROR("failed to enable dss_mmbuf_clk (%d)\n", ret);
 		return ret;
 	}
+
 	dss_inner_clk_pdp_enable(acrtc);
 	dss_inner_clk_common_enable(acrtc);
 	dpe_interrupt_mask(acrtc);
@@ -174,18 +168,6 @@ static int dss_power_up(struct dss_crtc *acrtc)
 	ctx->power_on = true;
 	return 0;
 }
-
-#if 0
-static void dss_power_down(struct dss_crtc *acrtc)
-{
-	struct dss_hw_ctx *ctx = acrtc->ctx;
-
-	dpe_interrupt_mask(acrtc);
-	dpe_irq_disable(acrtc);
-
-	ctx->power_on = false;
-}
-#endif
 
 static int dss_enable_vblank(struct drm_device *dev, unsigned int pipe)
 {
@@ -264,31 +246,20 @@ static void dss_crtc_atomic_enable(struct drm_crtc *crtc,
 {
 	struct dss_crtc *acrtc = to_dss_crtc(crtc);
 	struct dss_hw_ctx *ctx = acrtc->ctx;
-	int ret;
-
-	if (acrtc->enable)
-		return;
+	void __iomem *dss_base = ctx->base;
 
 	if (!ctx->power_on) {
-		ret = dss_power_up(acrtc);
+		int ret = dss_power_up(acrtc);
 		if (ret)
 			return;
 	}
 
-	acrtc->enable = true;
 	drm_crtc_vblank_on(crtc);
 }
 
 static void dss_crtc_atomic_disable(struct drm_crtc *crtc,
 				    struct drm_crtc_state *old_state)
 {
-	struct dss_crtc *acrtc = to_dss_crtc(crtc);
-
-	if (!acrtc->enable)
-		return;
-
-	/*dss_power_down(acrtc);*/
-	acrtc->enable = false;
 	drm_crtc_vblank_off(crtc);
 }
 
@@ -398,7 +369,6 @@ static int dss_plane_atomic_check(struct drm_plane *plane,
 	if (!crtc || !fb)
 		return 0;
 
-	//fmt = dss_get_format(fb->pixel_format);
 	fmt = dss_get_format(fb->format->format);
 	if (fmt == HISI_FB_PIXEL_FORMAT_UNSUPPORT)
 		return -EINVAL;
@@ -435,7 +405,7 @@ static void dss_plane_atomic_update(struct drm_plane *plane,
 static void dss_plane_atomic_disable(struct drm_plane *plane,
 				     struct drm_plane_state *old_state)
 {
-	//struct dss_plane *aplane = to_dss_plane(plane);
+	hisi_fb_pan_display_disable(plane);
 }
 
 static const struct drm_plane_helper_funcs dss_plane_helper_funcs = {
@@ -477,36 +447,15 @@ static int dss_plane_init(struct drm_device *dev, struct dss_plane *aplane,
 	return 0;
 }
 
-#if 0 
-static int dss_enable_iommu(struct platform_device *pdev, struct dss_hw_ctx *ctx)
-{
-	struct device *dev = NULL;
-
-	dev = &pdev->dev;
-
-	/* create iommu domain */
-	ctx->mmu_domain = iommu_domain_alloc(dev->bus);
-	if (!ctx->mmu_domain) {
-		pr_err("iommu_domain_alloc failed!\n");
-		return -EINVAL;
-	}
-
-	iommu_attach_device(ctx->mmu_domain, dev);
-
-	return 0;
-}
-#endif
-
 static int dss_dts_parse(struct platform_device *pdev, struct dss_hw_ctx *ctx)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = NULL;
 	int ret = 0;
 
-	np = of_find_compatible_node(NULL, NULL, DTS_COMP_DSS_NAME);
+	np = of_find_compatible_node(NULL, NULL, "hisilicon,hi3660-dpe");
 	if (!np) {
-			DRM_ERROR("NOT FOUND device node %s!\n",
-				    DTS_COMP_DSS_NAME);
+			DRM_ERROR("NOT FOUND device node!\n");
 			return -ENXIO;
 	}
 
@@ -547,8 +496,6 @@ static int dss_dts_parse(struct platform_device *pdev, struct dss_hw_ctx *ctx)
 		return -ENXIO;
 	}
 
-	DRM_INFO("dss irq = %d.", ctx->irq);
-
 	ctx->dss_mmbuf_clk = devm_clk_get(dev, "clk_dss_axi_mm");
 	if (!ctx->dss_mmbuf_clk) {
 		DRM_ERROR("failed to parse dss_mmbuf_clk\n");
@@ -580,9 +527,6 @@ static int dss_dts_parse(struct platform_device *pdev, struct dss_hw_ctx *ctx)
 		return -EINVAL;
 	}
 
-	DRM_INFO("dss_pri_clk:[%lu]->[%llu].\n",
-		DEFAULT_DSS_CORE_CLK_07V_RATE, (uint64_t)clk_get_rate(ctx->dss_pri_clk));
-
 	ctx->dss_pxl0_clk = devm_clk_get(dev, "clk_ldi0");
 	if (!ctx->dss_pxl0_clk) {
 		DRM_ERROR("failed to parse dss_pxl0_clk\n");
@@ -595,13 +539,6 @@ static int dss_dts_parse(struct platform_device *pdev, struct dss_hw_ctx *ctx)
 			DSS_MAX_PXL0_CLK_144M, ret);
 		return -EINVAL;
 	}
-
-	DRM_INFO("dss_pxl0_clk:[%lu]->[%llu].\n",
-		DSS_MAX_PXL0_CLK_144M, (uint64_t)clk_get_rate(ctx->dss_pxl0_clk));
-
-	/* regulator enable */
-
-	//dss_enable_iommu(pdev, ctx);
 
 	return 0;
 }
@@ -617,7 +554,6 @@ static int dss_drm_init(struct platform_device *pdev)
 	int ret;
 	int i;
 
-	DRM_INFO("+.\n");
 	dss = devm_kzalloc(dev->dev, sizeof(*dss), GFP_KERNEL);
 	if (!dss) {
 		DRM_ERROR("failed to alloc dss_data\n");
@@ -635,19 +571,11 @@ static int dss_drm_init(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	ctx->ion_client = NULL;
-	ctx->ion_handle = NULL;
-	ctx->screen_base = 0;
-	ctx->screen_size = 0;
-	ctx->smem_start = 0;
-
 	ctx->vactive0_end_flag = 0;
 	init_waitqueue_head(&ctx->vactive0_end_wq);
 
 	/*
 	 * plane init
-	 * TODO: Now only support primary plane, overlay planes
-	 * need to do.
 	 */
 	for (i = 0; i < DSS_CH_NUM; i++) {
 		aplane = &dss->aplane[i];
@@ -681,7 +609,6 @@ static int dss_drm_init(struct platform_device *pdev)
 	dev->driver->enable_vblank = dss_enable_vblank;
 	dev->driver->disable_vblank = dss_disable_vblank;
 
-	DRM_INFO("-.\n");
 	return 0;
 }
 

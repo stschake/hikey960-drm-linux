@@ -356,7 +356,7 @@ static void __adv7511_power_on(struct adv7511 *adv7511)
 			   ADV7511_REG_POWER2_HPD_SRC_NONE);
 
 	/* HACK: If we don't delay here edid probing doesn't work properly */
-	msleep(200);
+	msleep(500);
 }
 
 static void adv7511_power_on(struct adv7511 *adv7511)
@@ -599,7 +599,7 @@ static int adv7511_get_modes(struct adv7511 *adv7511,
 
 	drm_mode_connector_update_edid_property(connector, edid);
 	count = drm_add_edid_modes(connector, edid);
-
+	printk(KERN_INFO "got %d modes\n", count);
 	adv7511_set_config_csc(adv7511, connector, adv7511->rgb);
 
 	return count;
@@ -653,7 +653,7 @@ static int adv7511_mode_valid(struct adv7511 *adv7511,
 	/*
 	 * some work well modes which want to put in the front of the mode list.
 	 */
-	DRM_DEBUG("Checking mode %ix%i@%i clock: %i...",
+	printk(KERN_INFO "Checking mode %ix%i@%i clock: %i...",
 		  mode->hdisplay, mode->vdisplay, drm_mode_vrefresh(mode), mode->clock);
 	if ((mode->hdisplay == 1920 && mode->vdisplay == 1080 && mode->clock == 148500) ||
 	    (mode->hdisplay == 1280 && mode->vdisplay == 800 && mode->clock == 83496) ||
@@ -661,11 +661,12 @@ static int adv7511_mode_valid(struct adv7511 *adv7511,
 	    (mode->hdisplay == 1280 && mode->vdisplay == 720 && mode->clock == 74250) ||
 	    (mode->hdisplay == 1024 && mode->vdisplay == 768 && mode->clock == 75000) ||
 	    (mode->hdisplay == 1024 && mode->vdisplay == 768 && mode->clock == 81833) ||
-	    (mode->hdisplay == 1024 && mode->vdisplay == 600 && mode->clock == 50250) ||
-	    (mode->hdisplay == 800 && mode->vdisplay == 600 && mode->clock == 40000)) {
+	    (mode->hdisplay == 1024 && mode->vdisplay == 600 && (mode->clock == 50250 || mode->clock == 48924 || mode->clock==32000)) ||
+	    (mode->hdisplay == 800 && mode->vdisplay == 600 && mode->clock == 40000) ||
+	    (mode->hdisplay == 1366 && mode->vdisplay == 768 && mode->clock == 85885)) {
 
 		mode->type |= DRM_MODE_TYPE_PREFERRED;
-		DRM_DEBUG("OK\n");
+		printk(KERN_INFO "OK\n");
 		return MODE_OK;
 	}
 	DRM_DEBUG("BAD\n");

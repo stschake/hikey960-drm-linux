@@ -19,9 +19,6 @@
 #include <linux/wait.h>
 #include <linux/bug.h>
 
-#include <../../drivers/staging/android/ion/ion.h>
-//#include <linux/hisi/hisi_ion.h>
-
 /*******************************************************************************
 **
 */
@@ -2953,20 +2950,11 @@ struct dss_hw_ctx {
 	u32 vactive0_end_flag;
 	ktime_t vsync_timestamp;
 	ktime_t vsync_timestamp_prev;
-
-	struct iommu_domain *mmu_domain;
-	struct ion_client *ion_client;
-	struct ion_handle *ion_handle;
-	//struct iommu_map_format iommu_format;
-	char __iomem *screen_base;
-	unsigned long smem_start;
-	unsigned long screen_size;
 };
 
 struct dss_crtc {
 	struct drm_crtc base;
 	struct dss_hw_ctx *ctx;
-	bool enable;
 	u32 out_format;
 	u32 bgr_fmt;
 };
@@ -3071,16 +3059,6 @@ enum PXL0_DSI_GT_EN {
 	PXL0_DSI_GT_EN_2,
 	PXL0_DSI_GT_EN_3,
 };
-
-typedef struct mipi_ifbc_division {
-	u32 xres_div;
-	u32 yres_div;
-	u32 comp_mode;
-	u32 pxl0_div2_gt_en;
-	u32 pxl0_div4_gt_en;
-	u32 pxl0_divxcfg;
-	u32 pxl0_dsi_gt_en;
-} mipi_ifbc_division_t;
 
 /*******************************************************************************
 **
