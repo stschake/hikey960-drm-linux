@@ -498,7 +498,6 @@ static int hisi_dss_aif_ch_config(struct dss_hw_ctx *ctx, int chn_idx)
 
 	set_reg(aif0_ch_base, 0x0, 1, 0);
 	set_reg(aif0_ch_base, (uint32_t)mid, 4, 4);
-
 	return 0;
 }
 
@@ -597,61 +596,64 @@ static void hisi_dss_rdma_disable(struct dss_hw_ctx *ctx, int chn_idx)
 }
 
 static int hisi_dss_rdma_config(struct dss_hw_ctx *ctx,
-	const dss_rect_ltrb_t src_rect, u32 display_addr, u32 hal_format,
-	u32 bpp, int chn_idx, bool mmu_enable)
+	const dss_rect_ltrb_t src_rect, dss_rect_ltrb_t *clip_rect, struct drm_framebuffer *fb, u32 hal_format,
+	u32 bpp, int chn_idx, bool mmu_enable, dss_rect_t *out_aligned_rect)
 {
 	void __iomem *rdma_base = ctx->base + g_dss_module_base[chn_idx][MODULE_DMA];
+	struct drm_gem_cma_object *obj = drm_fb_cma_get_gem_obj(fb, 0);
+	u32 stride = fb->pitches[0];
 	u32 aligned_pixel = DMA_ALIGN_BYTES / bpp;
 	u32 h_display = src_rect.right - src_rect.left;	
-	u32 rdma_stride = h_display * bpp / DMA_ALIGN_BYTES;
 	u32 rdma_format = hisi_pixel_format_hal2dma(hal_format);
 	dss_rect_ltrb_t aligned_rect = { 0, 0, 0, 0 };
-	dss_rect_ltrb_t clip_rect = { 0, 0, 0 , 0 };
 	u32 rdma_data_num = 0;
+	u32 display_addr;
 
 	aligned_rect.left = ALIGN_DOWN(src_rect.left, aligned_pixel);
-	aligned_rect.right = ALIGN_DOWN(src_rect.right, aligned_pixel) - 1;
+	aligned_rect.right = ALIGN_UP(src_rect.right, aligned_pixel) - 1;
 	aligned_rect.top = src_rect.top;
 	aligned_rect.bottom = DSS_HEIGHT(src_rect.bottom);
-	printk(KERN_INFO "aligned rect (%d, %d, %d, %d)\n", aligned_rect.left, aligned_rect.top, aligned_rect.right, aligned_rect.bottom);
-	//rdma_data_num = (rdma_oft_x1 - rdma_oft_x0 + 1) * (rdma_oft_y1 - rdma_oft_y0 + 1);
-	//display_addr = display_addr + aligned_rect.top * rdma_stride + aligned_rect.left * bpp;
+	display_addr = (u32)obj->paddr + aligned_rect.top * stride + aligned_rect.left * bpp;
 
-	clip_rect.left = src_rect.left - aligned_rect.left;
-	clip_rect.right = aligned_rect.right - DSS_WIDTH(src_rect.right);
-	clip_rect.top = src_rect.top - aligned_rect.top;
-	clip_rect.bottom = aligned_rect.bottom - DSS_HEIGHT(src_rect.bottom);
-	printk(KERN_INFO "clip rect (%d, %d, %d, %d)\n", clip_rect.left, clip_rect.top, clip_rect.right, clip_rect.bottom);
+	clip_rect->left = src_rect.left - aligned_rect.left;
+	clip_rect->right = aligned_rect.right - DSS_WIDTH(src_rect.right);
+	clip_rect->top = src_rect.top - aligned_rect.top;
+	clip_rect->bottom = aligned_rect.bottom - DSS_HEIGHT(src_rect.bottom);
+
+	out_aligned_rect->x = out_aligned_rect->y = 0;
+	out_aligned_rect->w = aligned_rect.right - aligned_rect.left + 1;
+	out_aligned_rect->h = aligned_rect.bottom - aligned_rect.top + 1;
 
 	set_reg(rdma_base + CH_REG_DEFAULT, 0x1, 32, 0);
 	set_reg(rdma_base + CH_REG_DEFAULT, 0x0, 32, 0);
-	set_reg(rdma_base + DMA_OFT_X0, aligned_rect.left / aligned_pixel, 12, 0);
-	set_reg(rdma_base + DMA_OFT_X1, aligned_rect.right / aligned_pixel, 12, 0);	
+	set_reg(rdma_base + DMA_OFT_X0, aligned_rect.left / aligned_pixel, 16, 0);
+	set_reg(rdma_base + DMA_OFT_X1, aligned_rect.right / aligned_pixel, 16, 0);	
 	set_reg(rdma_base + DMA_OFT_Y0, aligned_rect.top, 16, 0);
 	set_reg(rdma_base + DMA_OFT_Y1, aligned_rect.bottom, 16, 0);
 	set_reg(rdma_base + DMA_CTRL, rdma_format, 5, 3);
 	set_reg(rdma_base + DMA_CTRL, (mmu_enable ? 0x1 : 0x0), 1, 8);
 	set_reg(rdma_base + DMA_STRETCH_SIZE_VRT, aligned_rect.bottom - aligned_rect.top, 32, 0);
 	set_reg(rdma_base + DMA_DATA_ADDR0, display_addr, 32, 0);
-	//set_reg(rdma_base + DMA_DATA_NUM0, rdma_data_num, 30, 0);
-	set_reg(rdma_base + DMA_STRIDE0, rdma_stride, 13, 0);
+	set_reg(rdma_base + DMA_STRIDE0, stride / DMA_ALIGN_BYTES, 13, 0);
 	set_reg(rdma_base + CH_CTL, 0x1, 1, 0);
 	return 0;
 }
 
-static int hisi_dss_rdfc_config(struct dss_hw_ctx *ctx,
-	const dss_rect_ltrb_t rect, u32 hal_format, u32 bpp, int chn_idx)
+static int hisi_dss_rdfc_config(struct dss_hw_ctx *ctx, const dss_rect_t rect, 
+	dss_rect_ltrb_t clip_rect, u32 hal_format, u32 bpp, int chn_idx)
 {
 	void __iomem *rdfc_base = ctx->base + g_dss_module_base[chn_idx][MODULE_DFC];	
 	u32 dfc_pix_in_num = (bpp <= 2) ? 0x1 : 0x0;
-	u32 size_hrz = DSS_WIDTH(rect.right - rect.left);
-	u32 size_vrt = DSS_HEIGHT(rect.bottom - rect.top);
+	u32 dfc_aligned = (bpp <= 2) ? 4 : 2;
+	u32 size_hrz = DSS_WIDTH(rect.w);
+	u32 size_vrt = DSS_HEIGHT(rect.h);
 	u32 dfc_fmt = hisi_pixel_format_hal2dfc(hal_format);
 
 	set_reg(rdfc_base + DFC_DISP_SIZE, size_vrt | (size_hrz << 16), 29, 0);
 	set_reg(rdfc_base + DFC_PIX_IN_NUM, dfc_pix_in_num, 1, 0);
 	set_reg(rdfc_base + DFC_DISP_FMT, dfc_fmt, 5, 1);
-	// TODO: clip rect?
+	set_reg(rdfc_base + DFC_CLIP_CTL_HRZ, clip_rect.right | (clip_rect.left << 16), 32, 0);
+	set_reg(rdfc_base + DFC_CLIP_CTL_VRZ, clip_rect.bottom | (clip_rect.top << 16), 32, 0);
 	set_reg(rdfc_base + DFC_CTL_CLIP_EN, 0x1, 1, 0);
 	set_reg(rdfc_base + DFC_ICG_MODULE, 0x1, 1, 0);
 	return 0;
@@ -700,7 +702,6 @@ static int hisi_dss_ovl_config(struct dss_hw_ctx *ctx,
 	set_reg(ovl0_base + OVL_LAYER0_PEPOS, (DSS_HEIGHT(dst_rect.bottom) << 16) | DSS_WIDTH(dst_rect.right), 32, 0);
 	set_reg(ovl0_base + OVL_LAYER0_ALPHA, 0x00ff40ff, 32, 0);
 	set_reg(ovl0_base + OVL_LAYER0_CFG, 1, 1, 0);
-
 	return 0;
 }
 
@@ -746,26 +747,20 @@ REDO:
 static void hisi_chn_configure(struct dss_hw_ctx *ctx, int chn_idx, struct drm_framebuffer *fb, int crtc_x, int crtc_y, int crtc_w, int crtc_h,
 							   int src_x, int src_y, unsigned int src_w, unsigned int src_h)
 {
-	struct drm_gem_cma_object *obj = drm_fb_cma_get_gem_obj(fb, 0);
 	dss_rect_ltrb_t src_rect = { src_x, src_y, src_x + src_w, src_y + src_h };
 	dss_rect_ltrb_t dst_rect = { crtc_x, crtc_y, crtc_x + crtc_w, crtc_y + crtc_h };
+	dss_rect_ltrb_t clip_rect = { 0, 0, 0, 0 };
 	u32 hal_fmt = dss_get_format(fb->format->format);
 	u32 bpp = fb->format->cpp[0];
-	u32 stride = fb->pitches[0];
-	u32 display_addr = (u32)obj->paddr + src_y * stride;		
-
-	printk(KERN_INFO "channel%d: src:(%d,%d, %dx%d) crtc:(%d,%d, %dx%d), "
-		"fb:%dx%d, pixel_format=%d, stride=%d, paddr=0x%x, bpp=%d, bits_per_pixel=%d.\n",
-		chn_idx, src_x, src_y, src_w, src_h, crtc_x, crtc_y, crtc_w, crtc_h,
-		fb->width, fb->height, hal_fmt, stride, display_addr, bpp, fb->format->depth);
+	dss_rect_t aligned_rect;	
 
 	hisi_dss_mctl_mutex_lock(ctx);
 	hisi_dss_aif_ch_config(ctx, chn_idx);
 	hisi_dss_mif_config(ctx, chn_idx, false);
 	hisi_dss_smmu_config(ctx, chn_idx, false);
 
-	hisi_dss_rdma_config(ctx, src_rect, display_addr, hal_fmt, bpp, chn_idx, false);
-	hisi_dss_rdfc_config(ctx, src_rect, hal_fmt, bpp, chn_idx);
+	hisi_dss_rdma_config(ctx, src_rect, &clip_rect, fb, hal_fmt, bpp, chn_idx, false, &aligned_rect);
+	hisi_dss_rdfc_config(ctx, aligned_rect, clip_rect, hal_fmt, bpp, chn_idx);
 	hisi_dss_ovl_config(ctx, dst_rect, chn_idx);
 
 	hisi_dss_mctl_ov_config(ctx, chn_idx);
@@ -792,7 +787,7 @@ void hisi_fb_pan_display_disable(struct drm_plane *plane)
 	struct dss_plane *aplane = to_dss_plane(plane);
 	struct dss_crtc *acrtc = aplane->acrtc;
 	struct dss_hw_ctx *ctx = acrtc->ctx;
-	int chn = DSS_RCHN_D2;
+	int chn = aplane->ch;
 
 	hisi_dss_mctl_mutex_lock(ctx);
 	hisi_dss_rdma_disable(ctx, chn);
