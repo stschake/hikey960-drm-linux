@@ -723,35 +723,6 @@ void hisi_dss_mctl_on(struct dss_hw_ctx *ctx)
 	set_reg(mctl_base + MCTL_CTL_TOP, 0x2, 32, 0);
 }
 
-static int hisi_dss_wait_for_complete(struct dss_hw_ctx *ctx)
-{
-	char __iomem *dss_base = ctx->base;
-	u32 prev_vactive0_end = ctx->vactive0_end_flag;	
-	u32 times = 0;
-	int ret;	
-
-REDO:
-	ret = wait_event_interruptible_timeout(ctx->vactive0_end_wq,
-		(prev_vactive0_end != ctx->vactive0_end_flag),
-		msecs_to_jiffies(300));
-	if (ret == -ERESTARTSYS) {
-		if (times < 50) {
-			times++;
-			mdelay(10);
-			goto REDO;
-		}
-	}
-
-	if (ret <= 0) {
-		DRM_ERROR("wait_for vactive0_end_flag timeout! ret=%d.\n", ret);
-		ret = -ETIMEDOUT;
-	} else {
-		ret = 0;
-	}
-
-	return ret;
-}
-
 static void hisi_chn_configure(struct dss_hw_ctx *ctx, int chn_idx, struct drm_framebuffer *fb, int crtc_x, int crtc_y, int crtc_w, int crtc_h,
 							   int src_x, int src_y, unsigned int src_w, unsigned int src_h)
 {
@@ -785,9 +756,6 @@ void hisi_fb_pan_display(struct drm_plane *plane)
 
 	hisi_chn_configure(acrtc->ctx, aplane->ch, fb, state->crtc_x, state->crtc_y, state->crtc_w, state->crtc_h,
 					   state->src_x >> 16, state->src_y >> 16, state->src_w >> 16, state->src_h >> 16);
-
-	enable_ldi(acrtc);
-	hisi_dss_wait_for_complete(acrtc->ctx);
 }
 
 void hisi_fb_pan_display_disable(struct drm_plane *plane)
@@ -802,6 +770,4 @@ void hisi_fb_pan_display_disable(struct drm_plane *plane)
 	hisi_dss_ovl_disable(ctx, chn);
 	hisi_dss_mctl_sys_disable(ctx, chn);
 	hisi_dss_mctl_mutex_unlock(ctx);
-
-	disable_ldi(acrtc);
 }
