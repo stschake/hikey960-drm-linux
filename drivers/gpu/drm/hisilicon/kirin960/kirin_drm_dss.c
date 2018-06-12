@@ -255,11 +255,15 @@ static void dss_crtc_atomic_enable(struct drm_crtc *crtc,
 	}
 
 	drm_crtc_vblank_on(crtc);
+	enable_ldi(acrtc);
 }
 
 static void dss_crtc_atomic_disable(struct drm_crtc *crtc,
 				    struct drm_crtc_state *old_state)
 {
+	struct dss_crtc *acrtc = to_dss_crtc(crtc);
+
+	disable_ldi(acrtc);
 	drm_crtc_vblank_off(crtc);
 }
 
@@ -283,11 +287,41 @@ static void dss_crtc_atomic_begin(struct drm_crtc *crtc,
 		(void)dss_power_up(acrtc);
 }
 
+static int hisi_dss_wait_for_complete(struct dss_hw_ctx *ctx)
+{
+	char __iomem *dss_base = ctx->base;
+	u32 prev_vactive0_end = ctx->vactive0_end_flag;
+	u32 times = 0;
+	int ret;
+
+REDO:
+	ret = wait_event_interruptible_timeout(ctx->vactive0_end_wq,
+		(prev_vactive0_end != ctx->vactive0_end_flag),
+		msecs_to_jiffies(300));
+	if (ret == -ERESTARTSYS) {
+		if (times < 50) {
+			times++;
+			mdelay(10);
+			goto REDO;
+		}
+	}
+
+	if (ret <= 0) {
+		DRM_ERROR("wait_for vactive0_end_flag timeout! ret=%d.\n", ret);
+		ret = -ETIMEDOUT;
+	} else {
+		ret = 0;
+	}
+
+	return ret;
+}
+
 static void dss_crtc_atomic_flush(struct drm_crtc *crtc,
 				  struct drm_crtc_state *old_state)
 
 {
 	struct drm_pending_vblank_event *event = crtc->state->event;
+	struct dss_crtc *acrtc = to_dss_crtc(crtc);
 
 	if (event) {
 		crtc->state->event = NULL;
@@ -299,6 +333,8 @@ static void dss_crtc_atomic_flush(struct drm_crtc *crtc,
 			drm_crtc_send_vblank_event(crtc, event);
 		spin_unlock_irq(&crtc->dev->event_lock);
 	}
+
+	hisi_dss_wait_for_complete(acrtc->ctx);
 }
 
 static const struct drm_crtc_helper_funcs dss_crtc_helper_funcs = {
