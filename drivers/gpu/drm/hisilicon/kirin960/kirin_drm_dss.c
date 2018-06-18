@@ -466,7 +466,6 @@ static int dss_plane_init(struct drm_device *dev, struct dss_plane *aplane,
 	u32 fmts_cnt;
 	int ret = 0;
 
-	/* get properties */
 	fmts_cnt = dss_get_channel_formats(aplane->ch, &fmts);
 	if (ret)
 		return ret;
@@ -479,6 +478,12 @@ static int dss_plane_init(struct drm_device *dev, struct dss_plane *aplane,
 	}
 
 	drm_plane_helper_add(&aplane->base, &dss_plane_helper_funcs);
+
+	drm_plane_create_rotation_property(&aplane->base, DRM_MODE_ROTATE_0,
+					   DRM_MODE_ROTATE_0 |
+					   DRM_MODE_ROTATE_180 |
+					   DRM_MODE_REFLECT_X |
+					   DRM_MODE_REFLECT_Y);
 
 	return 0;
 }
