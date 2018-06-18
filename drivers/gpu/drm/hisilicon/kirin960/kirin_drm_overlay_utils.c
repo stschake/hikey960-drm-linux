@@ -509,7 +509,7 @@ static int hisi_dss_aif_ch_config(struct dss_hw_ctx *ctx, int chn_idx)
 	return 0;
 }
 
-static int hisi_dss_smmu_config(struct dss_hw_ctx *ctx, int chn_idx, bool mmu_enable)
+static int hisi_dss_smmu_config(struct dss_hw_ctx *ctx, int chn_idx)
 {
 	void __iomem *smmu_base;
 	u32 idx = 0, i = 0;
@@ -518,25 +518,17 @@ static int hisi_dss_smmu_config(struct dss_hw_ctx *ctx, int chn_idx, bool mmu_en
 
 	for (i = 0; i < g_dss_chn_sid_num[chn_idx]; i++) {
 		idx = g_dss_smmu_smrx_idx[chn_idx] + i;
-		if (!mmu_enable)
-			set_reg(smmu_base + SMMU_SMRx_NS + idx * 0x4, 1, 32, 0);
-		else
-			set_reg(smmu_base + SMMU_SMRx_NS + idx * 0x4, 0x70, 32, 0);
+		set_reg(smmu_base + SMMU_SMRx_NS + idx * 0x4, 1, 32, 0);
 	}
 
 	return 0;
 }
 
-static int hisi_dss_mif_config(struct dss_hw_ctx *ctx, int chn_idx, bool mmu_enable)
+static int hisi_dss_mif_config(struct dss_hw_ctx *ctx, int chn_idx)
 {
 	void __iomem *mif_ch_base = ctx->base + g_dss_module_base[chn_idx][MODULE_MIF_CHN];
 
-	if (!mmu_enable) {
-		set_reg(mif_ch_base + MIF_CTRL1, 0x1, 1, 5);
-	} else  {
-		set_reg(mif_ch_base + MIF_CTRL1, 0x00080000, 32, 0);
-	}
-
+	set_reg(mif_ch_base + MIF_CTRL1, 0x1, 1, 5);
 	return 0;
 }
 
@@ -640,7 +632,7 @@ static int rdma_stretch_ratio(u32 src_h, u32 dst_h)
 	u32 ratio = src_h / dst_h;
 	u32 threshold = (src_h + dst_h - 1) / dst_h;
 	
-	if (threshold < rdma_threshold)
+	if (threshold <= rdma_threshold)
 		ratio = 0;
 	return ratio;
 }
@@ -653,9 +645,9 @@ static int hisi_dss_rdma_config(struct dss_hw_ctx *ctx, const dss_rect_ltrb_t sr
 	struct drm_gem_cma_object *obj = drm_fb_cma_get_gem_obj(fb, 0);
 	u32 stride = fb->pitches[0];
 	u32 aligned_pixel = DMA_ALIGN_BYTES / bpp;
-	u32 h_display = src_rect.right - src_rect.left;
+	u32 v_display = src_rect.bottom - src_rect.top;
 	u32 rdma_format = hisi_pixel_format_hal2dma(hal_format);
-	u32 stretched_line_num = rdma_stretch_ratio(h_display, dst_rect.right - dst_rect.left);
+	u32 stretched_line_num = rdma_stretch_ratio(v_display, dst_rect.bottom - dst_rect.top);
 	u32 stretch_size_vrt = 0;
 	dss_rect_ltrb_t aligned_rect;
 	int rdma_transform;
@@ -676,12 +668,14 @@ static int hisi_dss_rdma_config(struct dss_hw_ctx *ctx, const dss_rect_ltrb_t sr
 	out_aligned_rect->h = aligned_rect.bottom - aligned_rect.top + 1;
 
 	if (stretched_line_num) {
-		stretch_size_vrt = out_aligned_rect->h / stretched_line_num;
+		stretch_size_vrt = out_aligned_rect->h / stretched_line_num
 						   + ((out_aligned_rect->h % stretched_line_num) ? 1 : 0) - 1;
 		out_aligned_rect->h = stretch_size_vrt + 1;
 	} else {
 		stretch_size_vrt = aligned_rect.bottom - aligned_rect.top;
 	}
+
+	printk(KERN_INFO "out_alignd_rect: %dx%d\n", out_aligned_rect->w, out_aligned_rect->h);
 
 	rdma_transform = drm_rotation_to_dss_transform(rotation);
 	if (rdma_transform < 0) {
@@ -728,14 +722,14 @@ static int hisi_dss_rdma_config(struct dss_hw_ctx *ctx, const dss_rect_ltrb_t sr
 	return 0;
 }
 
-static int hisi_dss_rdfc_config(struct dss_hw_ctx *ctx, const dss_rect_t rect, 
+static int hisi_dss_rdfc_config(struct dss_hw_ctx *ctx, dss_rect_t *rect, 
 	dss_rect_ltrb_t clip_rect, u32 hal_format, u32 bpp, int chn_idx)
 {
 	void __iomem *rdfc_base = ctx->base + g_dss_module_base[chn_idx][MODULE_DFC];	
 	u32 dfc_pix_in_num = (bpp <= 2) ? 0x1 : 0x0;
 	u32 dfc_aligned = (bpp <= 2) ? 4 : 2;
-	u32 size_hrz = DSS_WIDTH(rect.w);
-	u32 size_vrt = DSS_HEIGHT(rect.h);
+	u32 size_hrz = DSS_WIDTH(rect->w);
+	u32 size_vrt = DSS_HEIGHT(rect->h);
 	u32 dfc_fmt = hisi_pixel_format_hal2dfc(hal_format);
 
 	set_reg(rdfc_base + DFC_DISP_SIZE, size_vrt | (size_hrz << 16), 29, 0);
@@ -745,6 +739,11 @@ static int hisi_dss_rdfc_config(struct dss_hw_ctx *ctx, const dss_rect_t rect,
 	set_reg(rdfc_base + DFC_CLIP_CTL_VRZ, clip_rect.bottom | (clip_rect.top << 16), 32, 0);
 	set_reg(rdfc_base + DFC_CTL_CLIP_EN, 0x1, 1, 0);
 	set_reg(rdfc_base + DFC_ICG_MODULE, 0x1, 1, 0);
+
+	// adjust rect for the parts we've clipped or we end up scaling
+	rect->w -= clip_rect.left + clip_rect.right;
+	rect->h -= clip_rect.top + clip_rect.bottom;
+
 	return 0;
 }
 
@@ -799,11 +798,34 @@ static int hisi_dss_scl_config(struct dss_hw_ctx *ctx, int chn_idx, dss_rect_t *
 	u32 dst_height = dst_rect.bottom - dst_rect.top;
 	u32 dst_width = dst_rect.right - dst_rect.left;
 	u32 h_v_order = (aligned_rect->w > dst_width) ? 0 : 1;
+	bool en_hscl = aligned_rect->w != dst_width;
+	u32 scf_en_vscl = aligned_rect->h != dst_height ? 1 : 0;
+	u32 scf_en_vscl_str = 0;
+	u32 h_ratio = ((DSS_WIDTH(aligned_rect->w) * SCF_INC_FACTOR)
+				  + SCF_INC_FACTOR/2) / DSS_WIDTH(dst_width);
+	u32 v_ratio = ((DSS_HEIGHT(aligned_rect->h) * SCF_INC_FACTOR)
+				  + SCF_INC_FACTOR/2) / DSS_HEIGHT(dst_height);
 
-	// no scaling needed
-	if (aligned_rect->h == dst_height && aligned_rect->w == dst_width)
+	// TODO: need to atomic check for no scaling without SCL module
+	if (g_dss_module_base[chn_idx][MODULE_SCL] == 0)
 		return 0;
 
+	// no scaling needed
+	if (!en_hscl && !scf_en_vscl)
+		return 0;
+
+	if (aligned_rect->h > dst_height)
+		scf_en_vscl = 3;
+
+	// TODO: when we have pixel alpha it should be 3
+	if (v_ratio >= (2*SCF_INC_FACTOR))
+		scf_en_vscl_str = 1;
+
+	printk(KERN_INFO "dst: %dx%d, aligned: %dx%d, h_v_order: %d, en_hscl: %d, scf_en_vscl: %d, h_ratio: %d, v_ratio: %d\n",
+		   dst_width, dst_height, aligned_rect->w, aligned_rect->h, h_v_order, en_hscl, scf_en_vscl, h_ratio, v_ratio);
+
+	set_reg(scl_base + SCF_EN_HSCL_STR, 0, 1, 0);
+	set_reg(scl_base + SCF_EN_VSCL_STR, scf_en_vscl_str, 32, 0);
 	set_reg(scl_base + SCF_H_V_ORDER, h_v_order, 1, 0);
 	set_reg(scl_base + SCF_INPUT_WIDTH_HEIGHT, DSS_HEIGHT(aligned_rect->h) |
 			(DSS_WIDTH(aligned_rect->w) << 16), 32, 0);
@@ -811,7 +833,7 @@ static int hisi_dss_scl_config(struct dss_hw_ctx *ctx, int chn_idx, dss_rect_t *
 			(DSS_WIDTH(dst_width) << 16), 32, 0);
 	set_reg(scl_base + SCF_EN_HSCL, en_hscl ? 1 : 0, 1, 0);
 	set_reg(scl_base + SCF_EN_VSCL, scf_en_vscl, 2, 0);
-	set_reg(scl_base + SCF_ACC_HSCL, acc_hscl, 31, 0);
+	set_reg(scl_base + SCF_ACC_HSCL, 0, 31, 0);
 	set_reg(scl_base + SCF_INC_HSCL, h_ratio, 24, 0);
 	set_reg(scl_base + SCF_INC_VSCL, v_ratio, 24, 0);
 	set_reg(scl_base + SCF_EN_MMP, 1, 1, 0);
@@ -836,19 +858,20 @@ static void hisi_chn_configure(struct dss_hw_ctx *ctx, int chn_idx, struct drm_f
 	dss_rect_ltrb_t clip_rect = { 0, 0, 0, 0 };
 	u32 hal_fmt = dss_get_format(fb->format->format);
 	u32 bpp = fb->format->cpp[0];
-	dss_rect_t aligned_rect;	
+	dss_rect_t aligned_rect;
 
 	hisi_dss_mctl_mutex_lock(ctx);
 	hisi_dss_aif_ch_config(ctx, chn_idx);
-	hisi_dss_mif_config(ctx, chn_idx, false);
-	hisi_dss_smmu_config(ctx, chn_idx, false);
+	hisi_dss_mif_config(ctx, chn_idx);
+	hisi_dss_smmu_config(ctx, chn_idx);
 
 	hisi_dss_rdma_config(ctx, src_rect, dst_rect, &clip_rect, fb, hal_fmt, bpp, chn_idx, &aligned_rect, rotation);
-	hisi_dss_rdfc_config(ctx, aligned_rect, clip_rect, hal_fmt, bpp, chn_idx);
+	hisi_dss_rdfc_config(ctx, &aligned_rect, clip_rect, hal_fmt, bpp, chn_idx);
+	hisi_dss_scl_config(ctx, chn_idx, &aligned_rect, dst_rect);
 	hisi_dss_ovl_config(ctx, dst_rect, chn_idx);
 
 	hisi_dss_mctl_ov_config(ctx, chn_idx);
-	hisi_dss_mctl_sys_config(ctx, chn_idx, chn_idx);
+	hisi_dss_mctl_sys_config(ctx, chn_idx, 0);
 	hisi_dss_mctl_mutex_unlock(ctx);
 }
 
@@ -858,6 +881,8 @@ void hisi_fb_pan_display(struct drm_plane *plane)
 	struct drm_framebuffer *fb = state->fb;
 	struct dss_plane *aplane = to_dss_plane(plane);
 	struct dss_crtc *acrtc = aplane->acrtc;
+
+	aplane->ch = 3; // G0 with SCL support
 
 	hisi_chn_configure(acrtc->ctx, aplane->ch, fb, state->crtc_x, state->crtc_y, state->crtc_w, state->crtc_h,
 					   state->src_x >> 16, state->src_y >> 16, state->src_w >> 16, state->src_h >> 16, state->rotation);
