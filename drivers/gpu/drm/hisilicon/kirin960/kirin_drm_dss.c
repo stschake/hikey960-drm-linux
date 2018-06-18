@@ -413,11 +413,6 @@ static int dss_plane_atomic_check(struct drm_plane *plane,
 	if (IS_ERR(crtc_state))
 		return PTR_ERR(crtc_state);
 
-	if (src_w != crtc_w || src_h != crtc_h) {
-		DRM_ERROR("Scale not support!!!\n");
-		return -EINVAL;
-	}
-
 	if (src_x + src_w > fb->width ||
 	    src_y + src_h > fb->height)
 		return -EINVAL;
