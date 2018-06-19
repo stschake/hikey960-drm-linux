@@ -562,12 +562,13 @@ static int hisi_dss_mctl_ov_config(struct dss_hw_ctx *ctx, int chn_idx)
 	return 0;
 }
 
-static void hisi_dss_mctl_sys_disable(struct dss_hw_ctx *ctx, int chn_idx)
+static void hisi_dss_mctl_sys_disable(struct dss_hw_ctx *ctx, int chn_idx, int layer_idx)
 {
 	void __iomem *mctl_sys_base = ctx->base + DSS_MCTRL_SYS_OFFSET;
 	u32 mctl_rch_ov_oen_offset = MCTL_RCH0_OV_OEN + chn_idx * 0x4;
 	u32 mctl_rch_flush_en_offset = MCTL_RCH0_FLUSH_EN + chn_idx * 0x4;
 
+	set_reg(mctl_sys_base + MCTL_RCH_OV0_SEL, 0, 4, (layer_idx + 1) * 4);
 	set_reg(mctl_sys_base + mctl_rch_ov_oen_offset, 0, 32, 0);
 	set_reg(mctl_sys_base + mctl_rch_flush_en_offset, 0, 32, 0);
 }
@@ -623,7 +624,8 @@ static void hisi_dss_rdma_disable(struct dss_hw_ctx *ctx, int chn_idx)
 {
 	void __iomem *rdma_base = ctx->base + g_dss_module_base[chn_idx][MODULE_DMA];
 
-	set_reg(rdma_base + CH_CTL, 0, 1, 0);
+	set_reg(rdma_base + CH_REG_DEFAULT, 0x1, 32, 0);
+	set_reg(rdma_base + CH_REG_DEFAULT, 0x0, 32, 0);
 }
 
 static int rdma_stretch_ratio(u32 src_h, u32 dst_h)
@@ -704,8 +706,6 @@ static int hisi_dss_rdma_config(struct dss_hw_ctx *ctx, const dss_rect_ltrb_t sr
 			return -EINVAL;
 	}
 
-	set_reg(base + CH_REG_DEFAULT, 0x1, 32, 0);
-	set_reg(base + CH_REG_DEFAULT, 0x0, 32, 0);
 	set_reg(base + DMA_OFT_X0, aligned_rect.left / aligned_pixel, 16, 0);
 	set_reg(base + DMA_OFT_X1, aligned_rect.right / aligned_pixel, 16, 0);	
 	set_reg(base + DMA_OFT_Y0, aligned_rect.top, 16, 0);
@@ -791,6 +791,20 @@ static int hisi_dss_ovl_config(struct dss_hw_ctx *ctx,
 	return 0;
 }
 
+static int hisi_dss_post_clip_config(struct dss_hw_ctx *ctx, int chn_idx, dss_rect_ltrb_t dst_rect)
+{
+	char __iomem *pclip_base = ctx->base + g_dss_module_base[chn_idx][MODULE_POST_CLIP];
+
+	if (g_dss_module_base[chn_idx][MODULE_POST_CLIP] == 0)
+		return 0;
+	
+	set_reg(pclip_base + POST_CLIP_DISP_SIZE, DSS_HEIGHT(dst_rect.bottom - dst_rect.top) |
+		    (DSS_WIDTH(dst_rect.right - dst_rect.left) << 16), 32, 0);
+	set_reg(pclip_base + POST_CLIP_CTL_HRZ, 0, 32, 0);
+	set_reg(pclip_base + POST_CLIP_CTL_VRZ, 0, 32, 0);
+	set_reg(pclip_base + POST_CLIP_EN, 1, 32, 0);
+}
+
 static int hisi_dss_scl_config(struct dss_hw_ctx *ctx, int chn_idx, dss_rect_t *aligned_rect,
 							   dss_rect_ltrb_t dst_rect)
 {
@@ -810,16 +824,37 @@ static int hisi_dss_scl_config(struct dss_hw_ctx *ctx, int chn_idx, dss_rect_t *
 	if (g_dss_module_base[chn_idx][MODULE_SCL] == 0)
 		return 0;
 
+	// TODO: these all also need to move to atomic check
+	if (dst_height > (aligned_rect->h * SCF_UPSCALE_MAX)) {
+		printk(KERN_INFO "Upscale height out of range: %d => %d\n", aligned_rect->h, dst_height);
+		return -EINVAL;
+	}
+	if (aligned_rect->h > (dst_height * SCF_DOWNSCALE_MAX)) {
+		printk(KERN_INFO "Downscale height out of range: %d => %d\n", dst_height, aligned_rect->h);
+		return -EINVAL;
+	}
+	if (dst_width > (aligned_rect->w * SCF_UPSCALE_MAX)) {
+		printk(KERN_INFO "Upscale width out of range: %d => %d\n", aligned_rect->w, dst_width);
+		return -EINVAL;
+	}
+	if (aligned_rect->w > (dst_width * SCF_DOWNSCALE_MAX)) {
+		printk(KERN_INFO "Downscale width out of range: %d => %d\n", dst_width, aligned_rect->w);
+		return -EINVAL;
+	}
+
 	// no scaling needed
 	if (!en_hscl && !scf_en_vscl)
+	{
+		set_reg(scl_base + SCF_EN_MMP, 0, 1, 0);
 		return 0;
+	}
 
 	if (aligned_rect->h > dst_height)
 		scf_en_vscl = 3;
 
 	// TODO: when we have pixel alpha it should be 3
 	if (v_ratio >= (2*SCF_INC_FACTOR))
-		scf_en_vscl_str = 1;
+		scf_en_vscl_str = 3 /*1*/;
 
 	printk(KERN_INFO "dst: %dx%d, aligned: %dx%d, h_v_order: %d, en_hscl: %d, scf_en_vscl: %d, h_ratio: %d, v_ratio: %d\n",
 		   dst_width, dst_height, aligned_rect->w, aligned_rect->h, h_v_order, en_hscl, scf_en_vscl, h_ratio, v_ratio);
@@ -868,6 +903,7 @@ static void hisi_chn_configure(struct dss_hw_ctx *ctx, int chn_idx, struct drm_f
 	hisi_dss_rdma_config(ctx, src_rect, dst_rect, &clip_rect, fb, hal_fmt, bpp, chn_idx, &aligned_rect, rotation);
 	hisi_dss_rdfc_config(ctx, &aligned_rect, clip_rect, hal_fmt, bpp, chn_idx);
 	hisi_dss_scl_config(ctx, chn_idx, &aligned_rect, dst_rect);
+	hisi_dss_post_clip_config(ctx, chn_idx, dst_rect);
 	hisi_dss_ovl_config(ctx, dst_rect, chn_idx);
 
 	hisi_dss_mctl_ov_config(ctx, chn_idx);
@@ -882,9 +918,8 @@ void hisi_fb_pan_display(struct drm_plane *plane)
 	struct dss_plane *aplane = to_dss_plane(plane);
 	struct dss_crtc *acrtc = aplane->acrtc;
 
-	aplane->ch = 3; // G0 with SCL support
-
-	hisi_chn_configure(acrtc->ctx, aplane->ch, fb, state->crtc_x, state->crtc_y, state->crtc_w, state->crtc_h,
+	// ch 3 has the SCL support
+	hisi_chn_configure(acrtc->ctx, 3, fb, state->crtc_x, state->crtc_y, state->crtc_w, state->crtc_h,
 					   state->src_x >> 16, state->src_y >> 16, state->src_w >> 16, state->src_h >> 16, state->rotation);
 }
 
@@ -895,9 +930,12 @@ void hisi_fb_pan_display_disable(struct drm_plane *plane)
 	struct dss_hw_ctx *ctx = acrtc->ctx;
 	int chn = aplane->ch;
 
+	// ch 3 has the SCL support
+	chn = 3;
+
 	hisi_dss_mctl_mutex_lock(ctx);
-	hisi_dss_rdma_disable(ctx, chn);
+	hisi_dss_mctl_sys_disable(ctx, chn, 0);
 	hisi_dss_ovl_disable(ctx, chn);
-	hisi_dss_mctl_sys_disable(ctx, chn);
+	hisi_dss_rdma_disable(ctx, chn);
 	hisi_dss_mctl_mutex_unlock(ctx);
 }
