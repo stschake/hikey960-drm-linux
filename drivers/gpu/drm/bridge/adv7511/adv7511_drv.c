@@ -673,7 +673,6 @@ static enum drm_mode_status adv7511_mode_valid(struct adv7511 *adv7511,
 	    (mode->hdisplay == 1280 && mode->vdisplay == 720 && mode->clock == 74250) ||
 	    (mode->hdisplay == 1024 && mode->vdisplay == 768 && mode->clock == 75000) ||
 	    (mode->hdisplay == 1024 && mode->vdisplay == 768 && mode->clock == 81833) ||
-	    (mode->hdisplay == 800 && mode->vdisplay == 600 && mode->clock == 40000)) {
 	    (mode->hdisplay == 1024 && mode->vdisplay == 600 && (mode->clock == 50250 || mode->clock == 48924 || mode->clock==32000)) ||
 	    (mode->hdisplay == 800 && mode->vdisplay == 600 && mode->clock == 40000) ||
 	    (mode->hdisplay == 1366 && mode->vdisplay == 768 && mode->clock == 85885)) {
