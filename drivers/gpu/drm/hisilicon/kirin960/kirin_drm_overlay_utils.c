@@ -766,7 +766,7 @@ static void hisi_dss_ovl_disable(struct dss_hw_ctx *ctx, int layer_idx)
 {
 	void __iomem *ovl0_base = ctx->base + g_dss_module_ovl_base[DSS_OVL0][MODULE_OVL_BASE];
 
-	set_reg(ovl0_base + OVL_LAYER0_CFG, 0, 1, 0);
+	set_reg(ovl0_base + OVL_LAYER0_CFG + (layer_idx * 0x3C), 0, 1, 0);
 }
 
 static int hisi_dss_ovl_config(struct dss_hw_ctx *ctx,
@@ -774,12 +774,12 @@ static int hisi_dss_ovl_config(struct dss_hw_ctx *ctx,
 {
 	void __iomem *ovl0_base = ctx->base + g_dss_module_ovl_base[DSS_OVL0][MODULE_OVL_BASE];
 
-	set_reg(ovl0_base + OVL_LAYER0_POS, dst_rect.left | (dst_rect.top << 16), 32, 0);
-	set_reg(ovl0_base + OVL_LAYER0_SIZE, DSS_WIDTH(dst_rect.right) | (DSS_HEIGHT(dst_rect.bottom) << 16), 32, 0);
-	set_reg(ovl0_base + OVL_LAYER0_PSPOS, (dst_rect.top << 16) | dst_rect.left, 32, 0);
-	set_reg(ovl0_base + OVL_LAYER0_PEPOS, (DSS_HEIGHT(dst_rect.bottom) << 16) | DSS_WIDTH(dst_rect.right), 32, 0);
-	set_reg(ovl0_base + OVL_LAYER0_ALPHA, 0x00ff40ff, 32, 0);
-	set_reg(ovl0_base + OVL_LAYER0_CFG, 1, 1, 0);
+	set_reg(ovl0_base + OVL_LAYER0_POS + (layer_idx * 0x3C), dst_rect.left | (dst_rect.top << 16), 32, 0);
+	set_reg(ovl0_base + OVL_LAYER0_SIZE + (layer_idx * 0x3C), DSS_WIDTH(dst_rect.right) | (DSS_HEIGHT(dst_rect.bottom) << 16), 32, 0);
+	set_reg(ovl0_base + OVL_LAYER0_PSPOS + (layer_idx * 0x3C), (dst_rect.top << 16) | dst_rect.left, 32, 0);
+	set_reg(ovl0_base + OVL_LAYER0_PEPOS + (layer_idx * 0x3C), (DSS_HEIGHT(dst_rect.bottom) << 16) | DSS_WIDTH(dst_rect.right), 32, 0);
+	set_reg(ovl0_base + OVL_LAYER0_ALPHA + (layer_idx * 0x3C), 0x00ff40ff, 32, 0);
+	set_reg(ovl0_base + OVL_LAYER0_CFG + (layer_idx * 0x3C), 1, 1, 0);
 	return 0;
 }
 
@@ -877,15 +877,15 @@ void hisi_dss_mctl_on(struct dss_hw_ctx *ctx)
 	set_reg(mctl_base + MCTL_CTL_TOP, 0x2, 32, 0);
 }
 
-static void hisi_chn_configure(struct dss_hw_ctx *ctx, int chn_idx, struct drm_framebuffer *fb, int crtc_x, int crtc_y, int crtc_w, int crtc_h,
+static void hisi_chn_configure(struct dss_hw_ctx *ctx, int chn_idx, int layer_idx, struct drm_framebuffer *fb, int crtc_x, int crtc_y, int crtc_w, int crtc_h,
 							   int src_x, int src_y, unsigned int src_w, unsigned int src_h, int rotation)
 {
 	dss_rect_ltrb_t src_rect = { src_x, src_y, src_x + src_w, src_y + src_h };
 	dss_rect_ltrb_t dst_rect = { crtc_x, crtc_y, crtc_x + crtc_w, crtc_y + crtc_h };
-	dss_rect_ltrb_t clip_rect = { 0, 0, 0, 0 };
 	u32 hal_fmt = dss_get_format(fb->format->format);
 	u32 bpp = fb->format->cpp[0];
 	dss_rect_t aligned_rect;
+	dss_rect_ltrb_t clip_rect;
 
 	hisi_dss_mctl_mutex_lock(ctx);
 	hisi_dss_aif_ch_config(ctx, chn_idx);
@@ -896,10 +896,10 @@ static void hisi_chn_configure(struct dss_hw_ctx *ctx, int chn_idx, struct drm_f
 	hisi_dss_rdfc_config(ctx, &aligned_rect, clip_rect, hal_fmt, bpp, chn_idx);
 	hisi_dss_scl_config(ctx, chn_idx, &aligned_rect, dst_rect);
 	hisi_dss_post_clip_config(ctx, chn_idx, dst_rect);
-	hisi_dss_ovl_config(ctx, dst_rect, chn_idx);
+	hisi_dss_ovl_config(ctx, dst_rect, layer_idx);
 
 	hisi_dss_mctl_ov_config(ctx, chn_idx);
-	hisi_dss_mctl_sys_config(ctx, chn_idx, 0);
+	hisi_dss_mctl_sys_config(ctx, chn_idx, layer_idx);
 	hisi_dss_mctl_mutex_unlock(ctx);
 }
 
@@ -911,7 +911,7 @@ void hisi_fb_pan_display(struct drm_plane *plane)
 	struct dss_crtc *acrtc = aplane->acrtc;
 
 	// ch 3 has the SCL support
-	hisi_chn_configure(acrtc->ctx, 3, fb, state->crtc_x, state->crtc_y, state->crtc_w, state->crtc_h,
+	hisi_chn_configure(acrtc->ctx, aplane->channel, aplane->layer, fb, state->crtc_x, state->crtc_y, state->crtc_w, state->crtc_h,
 					   state->src_x >> 16, state->src_y >> 16, state->src_w >> 16, state->src_h >> 16, state->rotation);
 }
 
@@ -920,14 +920,10 @@ void hisi_fb_pan_display_disable(struct drm_plane *plane)
 	struct dss_plane *aplane = to_dss_plane(plane);
 	struct dss_crtc *acrtc = aplane->acrtc;
 	struct dss_hw_ctx *ctx = acrtc->ctx;
-	int chn = aplane->ch;
-
-	// ch 3 has the SCL support
-	chn = 3;
 
 	hisi_dss_mctl_mutex_lock(ctx);
-	hisi_dss_mctl_sys_disable(ctx, chn, 0);
-	hisi_dss_ovl_disable(ctx, chn);
-	hisi_dss_rdma_disable(ctx, chn);
+	hisi_dss_mctl_sys_disable(ctx, aplane->channel, aplane->layer);
+	hisi_dss_ovl_disable(ctx, aplane->channel);
+	hisi_dss_rdma_disable(ctx, aplane->channel);
 	hisi_dss_mctl_mutex_unlock(ctx);
 }

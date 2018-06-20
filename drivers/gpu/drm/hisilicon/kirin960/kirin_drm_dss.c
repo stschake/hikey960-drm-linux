@@ -61,15 +61,8 @@ static const u32 channel_formats1[] = {
 
 u32 dss_get_channel_formats(u8 ch, const u32 **formats)
 {
-	switch (ch) {
-	case DSS_CH1:
-		*formats = channel_formats1;
-		return ARRAY_SIZE(channel_formats1);
-	default:
-		DRM_ERROR("no this channel %d\n", ch);
-		*formats = NULL;
-		return 0;
-	}
+	*formats = channel_formats1;
+	return ARRAY_SIZE(channel_formats1);
 }
 
 /* convert from fourcc format to dss format */
@@ -461,14 +454,14 @@ static int dss_plane_init(struct drm_device *dev, struct dss_plane *aplane,
 	u32 fmts_cnt;
 	int ret = 0;
 
-	fmts_cnt = dss_get_channel_formats(aplane->ch, &fmts);
+	fmts_cnt = dss_get_channel_formats(aplane->channel, &fmts);
 	if (ret)
 		return ret;
 
 	ret = drm_universal_plane_init(dev, &aplane->base, 1, &dss_plane_funcs,
 				       fmts, fmts_cnt, NULL, type, NULL);
 	if (ret) {
-		DRM_ERROR("fail to init plane, ch=%d\n", aplane->ch);
+		DRM_ERROR("fail to init plane, ch=%d\n", aplane->channel);
 		return ret;
 	}
 
@@ -582,6 +575,7 @@ static int dss_dts_parse(struct platform_device *pdev, struct dss_hw_ctx *ctx)
 static int dss_drm_init(struct platform_device *pdev)
 {
 	struct drm_device *dev = platform_get_drvdata(pdev);
+	const u32 channels[] = { DSS_RCHN_G0, DSS_RCHN_G1 };
 	struct dss_data *dss;
 	struct dss_hw_ctx *ctx;
 	struct dss_crtc *acrtc;
@@ -613,13 +607,12 @@ static int dss_drm_init(struct platform_device *pdev)
 	/*
 	 * plane init
 	 */
-	for (i = 0; i < DSS_CH_NUM; i++) {
+	for (i = 0; i < ARRAY_SIZE(channels); i++) {
 		aplane = &dss->aplane[i];
-		aplane->ch = i;
-		/*aplane->ctx = ctx;*/
+		aplane->channel = channels[i];
+		aplane->layer = i;
 		aplane->acrtc = acrtc;
-		type = i == PRIMARY_CH ? DRM_PLANE_TYPE_PRIMARY :
-			DRM_PLANE_TYPE_OVERLAY;
+		type = i == 0 ? DRM_PLANE_TYPE_PRIMARY : DRM_PLANE_TYPE_OVERLAY;
 
 		ret = dss_plane_init(dev, aplane, type);
 		if (ret)
@@ -627,7 +620,7 @@ static int dss_drm_init(struct platform_device *pdev)
 	}
 
 	/* crtc init */
-	ret = dss_crtc_init(dev, &acrtc->base, &dss->aplane[PRIMARY_CH].base);
+	ret = dss_crtc_init(dev, &acrtc->base, &dss->aplane[0].base);
 	if (ret)
 		return ret;
 

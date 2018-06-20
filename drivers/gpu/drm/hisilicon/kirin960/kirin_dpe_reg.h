@@ -46,10 +46,8 @@ enum dss_chn_idx {
 
 enum dss_channel {
 	DSS_CH1 = 0,	/* channel 1 for primary plane */
-	DSS_CH_NUM
+	DSS_CH2 = 1
 };
-
-#define PRIMARY_CH	DSS_CH1 /* primary plane */
 
 typedef struct dss_rect {
 	s32 x;
@@ -2959,14 +2957,14 @@ struct dss_crtc {
 
 struct dss_plane {
 	struct drm_plane base;
-	/*void *ctx;*/
-	void *acrtc;
-	u8 ch; /* channel */
+	struct dss_crtc *acrtc;
+	u8 channel;
+	u8 layer;
 };
 
 struct dss_data {
 	struct dss_crtc acrtc;
-	struct dss_plane aplane[DSS_CH_NUM];
+	struct dss_plane aplane[2];
 	struct dss_hw_ctx ctx;
 };
 
